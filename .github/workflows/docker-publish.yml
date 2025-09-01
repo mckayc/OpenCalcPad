@@ -3,7 +3,7 @@ name: Build and Push to Docker Hub
 on:
   push:
     branches:
-      - main  # or your default branch
+      - main  # change if your default branch is different
 
 jobs:
   build-and-push:
@@ -24,4 +24,4 @@ jobs:
         with:
           context: .
           push: true
-          tags: mckayc/opencalcpad:latest
+          tags: docker.io/mckayc/opencalcpad:latest
