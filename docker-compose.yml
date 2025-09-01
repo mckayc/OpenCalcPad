@@ -1,0 +1,11 @@
+version: '3.8'
+services:
+  app:
+      build: .
+    container_name: opencalcpad
+        ports:
+      - "3000:3001"
+          volumes:
+      - opencalcpad-data:/app/data
+      volumes:
+  opencalcpad-data:
