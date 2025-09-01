@@ -1,11 +1,14 @@
 version: '3.8'
+
 services:
   app:
-      build: .
+    image: mckayc/opencalcpad:latest
     container_name: opencalcpad
-        ports:
-      - "3000:3001"
-          volumes:
+    restart: unless-stopped
+    ports:
+      - "3355:3001"
+    volumes:
       - opencalcpad-data:/app/data
-      volumes:
+
+volumes:
   opencalcpad-data:
