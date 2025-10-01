@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import type { Calculator, WindowState } from '../types';
 import { CloseIcon, ScienceIcon, PencilIcon } from './Icons';
-import { performConversion } from '../utils/conversions';
 
 interface CalculatorWindowProps {
   calculator: Calculator;
@@ -19,14 +18,19 @@ const evaluateExpression = (expr: string): number | string => {
   if (!trimmedExpr) return '';
 
   try {
+    // Sanitize input by removing common currency symbols and commas.
+    const sanitizedExpr = trimmedExpr
+      .replace(/[$,€£¥]/g, '')
+      .replace(/,/g, '');
+
     // Using `with(Math)` is deprecated and causes issues in strict mode.
     // We will explicitly prefix Math functions and constants to ensure correct evaluation.
-    const cleanExpr = trimmedExpr
+    const cleanExpr = sanitizedExpr
       .replace(/÷/g, '/')
       .replace(/×/g, '*')
       .replace(/\^/g, '**')
       .replace(/(\d*\.?\d+)%/g, '($1/100)')
-      .replace(/√\(/g, 'Math.sqrt(')
+      .replace(/√/g, 'Math.sqrt')
       .replace(/\b(sin|cos|tan|log)\b/g, 'Math.$1')
       .replace(/\b(pi|π)\b/gi, 'Math.PI')
       .replace(/(?<![a-zA-Z])e(?![a-zA-Z])/gi, 'Math.E');
@@ -46,12 +50,9 @@ const evaluateExpression = (expr: string): number | string => {
 const getLastResult = (history: string): string | null => {
     const lines = history.trim().split('\n');
     for (let i = lines.length - 1; i >= 0; i--) {
-        const line = lines[i].trim();
-        if (line.includes('------- Values Reset --------')) {
-            return '0';
-        }
-        if (line.startsWith('=')) {
-            const result = line.replace('=', '').trim().split(' ')[0]; // Handle results with units like '= 5 EUR'
+        const line = lines[i];
+        if (line.trim().startsWith('=')) {
+            const result = line.replace('=', '').trim();
             if (result && !isNaN(parseFloat(result))) {
                 return result;
             }
@@ -60,7 +61,8 @@ const getLastResult = (history: string): string | null => {
     return '0';
 };
 
-export const CalculatorWindow = ({ 
+// Fix: Explicitly type CalculatorWindow as a React.FC to correctly handle React-specific props like `key`.
+export const CalculatorWindow: React.FC<CalculatorWindowProps> = ({ 
   calculator, 
   windowState, 
   onUpdateCalculator, 
@@ -69,7 +71,7 @@ export const CalculatorWindow = ({
   onClose,
   onToggleScientific,
   onUndo
-}: CalculatorWindowProps) => {
+}) => {
 
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
@@ -167,14 +169,6 @@ export const CalculatorWindow = ({
   
   const handleCalculate = useCallback(() => {
     const trimmedInput = input.trim();
-
-    // First, try to perform a conversion
-    const conversionResult = performConversion(trimmedInput);
-    if (conversionResult) {
-        onUpdateCalculator(calculator.id, { history: `${calculator.history}${trimmedInput}\n= ${conversionResult}\n` });
-        setInput('');
-        return;
-    }
     
     if (!trimmedInput) {
         const historyLines = calculator.history.trim().split('\n');
@@ -227,7 +221,7 @@ export const CalculatorWindow = ({
           case '⌫': setInput(prev => prev.slice(0, -1)); break;
           case '=': handleCalculate(); break;
           case '↶': onUndo(); break;
-          case 'sin': case 'cos': case 'tan': case 'log': case '√': setInput(p => p + `${btn}(`); break;
+          case 'sin': case 'cos': case 'tan': case 'log': case 'sqrt': setInput(p => p + `${btn}(`); break;
           default: setInput(prev => prev + btn);
       }
       inputRef.current?.focus();
@@ -253,22 +247,11 @@ export const CalculatorWindow = ({
   
   const scientificButtons = [
       'sin', 'cos', 'tan', 'log',
-      '(', ')', '^', 'π',
-      '√', 'e', 
+      '√', '^', 'π', 'e',
+      '(', ')',
   ];
 
-  const renderButton = (btn: string) => (
-    <button 
-        key={btn}
-        onClick={() => handleButtonClick(btn)}
-        className={`
-            h-11 text-lg rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-100 dark:focus:ring-offset-slate-800 focus:ring-cyan-500 select-none
-            ${['÷', '*', '-', '+', '=', '^'].includes(btn) ? 'bg-cyan-500 hover:bg-cyan-400 text-white' : 'bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600'}
-            ${['C', '⌫'].includes(btn) ? 'bg-slate-300 dark:bg-slate-600 hover:bg-slate-400 dark:hover:bg-slate-500 text-red-500 dark:text-red-400' : ''}
-            ${['sin', 'cos', 'tan', 'log', '√', 'π', 'e', '(', ')', '↶', '%'].includes(btn) ? 'bg-slate-300 dark:bg-slate-600 hover:bg-slate-400 dark:hover:bg-slate-500' : ''}
-        `}
-    >{btn}</button>
-  );
+  const buttons = windowState.isScientific ? [...scientificButtons, ...baseButtons] : baseButtons;
 
   return (
     <div
@@ -334,7 +317,7 @@ export const CalculatorWindow = ({
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleInputKeyDown}
                 className="w-full bg-slate-100 dark:bg-slate-900 h-10 px-3 rounded-l-md text-cyan-600 dark:text-cyan-300 font-mono text-xl focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                placeholder="Calc, #note, or '10ft in cm'..."
+                placeholder="Enter calculation (# for notes)..."
                 autoFocus
             />
             <button
@@ -346,15 +329,19 @@ export const CalculatorWindow = ({
                 <PencilIcon className="h-5 w-5" />
             </button>
         </div>
-        <div className="mt-auto">
-            {windowState.isScientific && (
-              <div className="grid grid-cols-5 gap-2 mb-2">
-                {scientificButtons.slice(0, 10).map(renderButton)}
-              </div>
-            )}
-            <div className={`grid grid-cols-4 gap-2`}>
-                {baseButtons.map(renderButton)}
-            </div>
+        <div className={`grid ${windowState.isScientific ? 'grid-cols-4' : 'grid-cols-4'} gap-2`}>
+            {buttons.map(btn => (
+                <button 
+                    key={btn}
+                    onClick={() => handleButtonClick(btn)}
+                    className={`
+                        h-11 text-lg rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-100 dark:focus:ring-offset-slate-800 focus:ring-cyan-500 select-none
+                        ${['÷', '*', '-', '+', '=', '^'].includes(btn) ? 'bg-cyan-500 hover:bg-cyan-400 text-white' : 'bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600'}
+                        ${['C', '⌫'].includes(btn) ? 'bg-slate-300 dark:bg-slate-600 hover:bg-slate-400 dark:hover:bg-slate-500 text-red-500 dark:text-red-400' : ''}
+                        ${['sin', 'cos', 'tan', 'log', '√', 'π', 'e', '(', ')', '↶', '%'].includes(btn) ? 'bg-slate-300 dark:bg-slate-600 hover:bg-slate-400 dark:hover:bg-slate-500' : ''}
+                    `}
+                >{btn}</button>
+            ))}
         </div>
       </div>
 
