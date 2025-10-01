@@ -1,6 +1,8 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+// FIX: Import FC to correctly type the component as a React Function Component.
+import React, { useState, useRef, useEffect, useCallback, FC } from 'react';
 import type { Calculator, WindowState } from '../types';
 import { CloseIcon, ScienceIcon, PencilIcon } from './Icons';
+import { performConversion, findUnit, lengthUnits } from '../utils/conversions';
 
 interface CalculatorWindowProps {
   calculator: Calculator;
@@ -16,43 +18,113 @@ interface CalculatorWindowProps {
 const evaluateExpression = (expr: string): number | string => {
   const trimmedExpr = expr?.trim();
   if (!trimmedExpr) return '';
-
+  
   try {
-    // Sanitize input by removing common currency symbols and commas.
-    const sanitizedExpr = trimmedExpr
-      .replace(/[$,€£¥]/g, '')
-      .replace(/,/g, '');
+    // Pre-process for compound length units like 6ft3in or 6'3"
+    const escapeRegExp = (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const lengthUnitKeys = Object.keys(lengthUnits).map(escapeRegExp).join('|');
+    const compoundLengthRegex = new RegExp(`(\\d*\\.?\\d+\\s*(?:${lengthUnitKeys}))(?=\\s*-?\\d)`, 'gi');
+    const preprocessedExpr = trimmedExpr.replace(compoundLengthRegex, '$1+');
 
-    // Using `with(Math)` is deprecated and causes issues in strict mode.
-    // We will explicitly prefix Math functions and constants to ensure correct evaluation.
-    const cleanExpr = sanitizedExpr
+    // Stage 1: Sanitize input for evaluation
+    let sanitizedExpr = preprocessedExpr
       .replace(/÷/g, '/')
       .replace(/×/g, '*')
       .replace(/\^/g, '**')
       .replace(/(\d*\.?\d+)%/g, '($1/100)')
-      .replace(/√/g, 'Math.sqrt')
+      .replace(/√\(/g, 'Math.sqrt(')
       .replace(/\b(sin|cos|tan|log)\b/g, 'Math.$1')
-      .replace(/\b(pi|π)\b/gi, 'Math.PI')
+      .replace(/\bpi\b|π/gi, 'Math.PI')
       .replace(/(?<![a-zA-Z])e(?![a-zA-Z])/gi, 'Math.E');
 
-    const result = new Function('return ' + cleanExpr)();
+    // Stage 2: Handle unit conversions within the expression
+    const numberUnitRegex = /-?\d*\.?\d+\s*[a-zA-Z$€£¥'"]+/g;
+    const unitMatches = sanitizedExpr.match(numberUnitRegex);
 
-    if (typeof result !== 'number' || !isFinite(result)) {
-      return 'Error';
+    if (unitMatches) {
+        let targetCategory: string | null = null;
+        let targetUnitInfo: { unit: string; factor: number; isCurrency: boolean } | null = null;
+        
+        const expressionWithBaseUnits = sanitizedExpr.replace(numberUnitRegex, (match) => {
+            const amountMatch = match.match(/-?\d*\.?\d+/);
+            const unitMatch = match.match(/[a-zA-Z$€£¥'"]+/);
+            
+            if (!amountMatch || !unitMatch) return match;
+
+            const amount = parseFloat(amountMatch[0]);
+            const unit = unitMatch[0];
+            const unitInfo = findUnit(unit);
+
+            if (!unitInfo) return match; // Not a recognized unit, leave it for later error handling.
+
+            if (!targetCategory) {
+                targetCategory = unitInfo.categoryName;
+                targetUnitInfo = { unit: unit, factor: unitInfo.factor, isCurrency: unitInfo.isCurrency };
+            } else if (targetCategory !== unitInfo.categoryName) {
+                throw new Error(`Cannot mix unit types: ${targetCategory} and ${unitInfo.categoryName}`);
+            }
+
+            const valueInBase = unitInfo.isCurrency ? (amount / unitInfo.factor) : (amount * unitInfo.factor);
+            return `(${valueInBase})`;
+        });
+
+        const resultInBase = new Function('return ' + expressionWithBaseUnits)();
+        if (typeof resultInBase !== 'number' || !isFinite(resultInBase)) {
+            return 'Error';
+        }
+
+        if (targetUnitInfo) {
+             const finalResult = targetUnitInfo.isCurrency
+                ? resultInBase * targetUnitInfo.factor
+                : resultInBase / targetUnitInfo.factor;
+            return `${Number(finalResult.toPrecision(15))} ${targetUnitInfo.unit}`;
+        }
+        return Number(resultInBase.toPrecision(15));
+
+    } else {
+        // Stage 3: Standard evaluation (no units found)
+        let finalExpr = sanitizedExpr
+            .replace(/[$,€£¥]/g, '')
+            .replace(/,/g, '');
+        
+        const tempForChecking = finalExpr.replace(/\b(sin|cos|tan|log|pi|e)\b/gi, '').replace(/π/g, '');
+        const hasExtraneousText = /[a-zA-Z]/.test(tempForChecking);
+
+        if (hasExtraneousText) {
+            const numericParts = finalExpr.match(/-?\d*\.?\d+/g);
+            if (numericParts) {
+                finalExpr = numericParts[numericParts.length - 1];
+            } else {
+                return 'Error';
+            }
+        }
+        
+        if (finalExpr.trim() === '') return '';
+        const result = new Function('return ' + finalExpr)();
+
+        if (typeof result !== 'number' || !isFinite(result)) {
+          return 'Error';
+        }
+        return Number(result.toPrecision(15));
     }
-    return Number(result.toPrecision(15));
-  } catch (error) {
+
+  } catch (error: any) {
+    if(error.message.includes('Cannot mix unit types')) return `Error: ${error.message}`;
     console.error("Calculation Error:", error);
     return 'Error';
   }
 };
 
+
 const getLastResult = (history: string): string | null => {
     const lines = history.trim().split('\n');
     for (let i = lines.length - 1; i >= 0; i--) {
-        const line = lines[i];
-        if (line.trim().startsWith('=')) {
-            const result = line.replace('=', '').trim();
+        const line = lines[i].trim();
+        if (line.includes('------- Values Reset --------')) {
+            return '0';
+        }
+        if (line.startsWith('=')) {
+            const result = line.replace('=', '').trim().split(' ')[0]; // Handle results with units like '= 5 EUR'
             if (result && !isNaN(parseFloat(result))) {
                 return result;
             }
@@ -61,8 +133,11 @@ const getLastResult = (history: string): string | null => {
     return '0';
 };
 
-// Fix: Explicitly type CalculatorWindow as a React.FC to correctly handle React-specific props like `key`.
-export const CalculatorWindow: React.FC<CalculatorWindowProps> = ({ 
+// FIX: Explicitly type CalculatorWindow as a React.FC<CalculatorWindowProps>.
+// This resolves a TypeScript error in App.tsx where the 'key' prop was being
+// incorrectly flagged as an unexpected property. React.FC ensures that
+// React-specific props like 'key' are correctly handled by the type system.
+export const CalculatorWindow: FC<CalculatorWindowProps> = ({ 
   calculator, 
   windowState, 
   onUpdateCalculator, 
@@ -169,6 +244,14 @@ export const CalculatorWindow: React.FC<CalculatorWindowProps> = ({
   
   const handleCalculate = useCallback(() => {
     const trimmedInput = input.trim();
+
+    // First, try to perform a conversion (e.g. "10ft in cm")
+    const conversionResult = performConversion(trimmedInput);
+    if (conversionResult) {
+        onUpdateCalculator(calculator.id, { history: `${calculator.history}${trimmedInput}\n= ${conversionResult}\n` });
+        setInput('');
+        return;
+    }
     
     if (!trimmedInput) {
         const historyLines = calculator.history.trim().split('\n');
@@ -221,7 +304,7 @@ export const CalculatorWindow: React.FC<CalculatorWindowProps> = ({
           case '⌫': setInput(prev => prev.slice(0, -1)); break;
           case '=': handleCalculate(); break;
           case '↶': onUndo(); break;
-          case 'sin': case 'cos': case 'tan': case 'log': case 'sqrt': setInput(p => p + `${btn}(`); break;
+          case 'sin': case 'cos': case 'tan': case 'log': case '√': setInput(p => p + `${btn}(`); break;
           default: setInput(prev => prev + btn);
       }
       inputRef.current?.focus();
@@ -247,11 +330,22 @@ export const CalculatorWindow: React.FC<CalculatorWindowProps> = ({
   
   const scientificButtons = [
       'sin', 'cos', 'tan', 'log',
-      '√', '^', 'π', 'e',
-      '(', ')',
+      '(', ')', '^', 'π',
+      '√', 'e', 
   ];
 
-  const buttons = windowState.isScientific ? [...scientificButtons, ...baseButtons] : baseButtons;
+  const renderButton = (btn: string) => (
+    <button 
+        key={btn}
+        onClick={() => handleButtonClick(btn)}
+        className={`
+            h-11 text-lg rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-100 dark:focus:ring-offset-slate-800 focus:ring-cyan-500 select-none
+            ${['÷', '*', '-', '+', '=', '^'].includes(btn) ? 'bg-cyan-500 hover:bg-cyan-400 text-white' : 'bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600'}
+            ${['C', '⌫'].includes(btn) ? 'bg-slate-300 dark:bg-slate-600 hover:bg-slate-400 dark:hover:bg-slate-500 text-red-500 dark:text-red-400' : ''}
+            ${['sin', 'cos', 'tan', 'log', '√', 'π', 'e', '(', ')', '↶', '%'].includes(btn) ? 'bg-slate-300 dark:bg-slate-600 hover:bg-slate-400 dark:hover:bg-slate-500' : ''}
+        `}
+    >{btn}</button>
+  );
 
   return (
     <div
@@ -317,7 +411,7 @@ export const CalculatorWindow: React.FC<CalculatorWindowProps> = ({
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleInputKeyDown}
                 className="w-full bg-slate-100 dark:bg-slate-900 h-10 px-3 rounded-l-md text-cyan-600 dark:text-cyan-300 font-mono text-xl focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                placeholder="Enter calculation (# for notes)..."
+                placeholder="Calc, #note, or '5ft + 10in'..."
                 autoFocus
             />
             <button
@@ -329,19 +423,15 @@ export const CalculatorWindow: React.FC<CalculatorWindowProps> = ({
                 <PencilIcon className="h-5 w-5" />
             </button>
         </div>
-        <div className={`grid ${windowState.isScientific ? 'grid-cols-4' : 'grid-cols-4'} gap-2`}>
-            {buttons.map(btn => (
-                <button 
-                    key={btn}
-                    onClick={() => handleButtonClick(btn)}
-                    className={`
-                        h-11 text-lg rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-100 dark:focus:ring-offset-slate-800 focus:ring-cyan-500 select-none
-                        ${['÷', '*', '-', '+', '=', '^'].includes(btn) ? 'bg-cyan-500 hover:bg-cyan-400 text-white' : 'bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600'}
-                        ${['C', '⌫'].includes(btn) ? 'bg-slate-300 dark:bg-slate-600 hover:bg-slate-400 dark:hover:bg-slate-500 text-red-500 dark:text-red-400' : ''}
-                        ${['sin', 'cos', 'tan', 'log', '√', 'π', 'e', '(', ')', '↶', '%'].includes(btn) ? 'bg-slate-300 dark:bg-slate-600 hover:bg-slate-400 dark:hover:bg-slate-500' : ''}
-                    `}
-                >{btn}</button>
-            ))}
+        <div className="mt-auto">
+            {windowState.isScientific && (
+              <div className="grid grid-cols-5 gap-2 mb-2">
+                {scientificButtons.slice(0, 10).map(renderButton)}
+              </div>
+            )}
+            <div className={`grid grid-cols-4 gap-2`}>
+                {baseButtons.map(renderButton)}
+            </div>
         </div>
       </div>
 

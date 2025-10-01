@@ -61,14 +61,15 @@ export const SettingsModal = ({ theme, setTheme, onClose }: SettingsModalProps) 
                         • <strong>Take Notes:</strong> Start a line with <code className="bg-slate-200 dark:bg-slate-700 px-1.5 py-0.5 rounded text-xs">#</code> to add a comment.
                     </p>
                     <div>
-                        <p>• <strong>Convert Units & Currencies:</strong></p>
+                        <p>• <strong>Convert & Calculate with Units:</strong></p>
                         <p className="pl-4">
-                          Just type what you want to convert in the input field. Examples:
+                          Just type what you want to compute. Examples:
                         </p>
                         <ul className="list-none pl-8 mt-1 space-y-1">
-                            <li><code className="bg-slate-200 dark:bg-slate-700 px-1.5 py-0.5 rounded text-xs">10ft in cm</code></li>
-                            <li><code className="bg-slate-200 dark:bg-slate-700 px-1.5 py-0.5 rounded text-xs">15 USD to EUR</code></li>
-                            <li><code className="bg-slate-200 dark:bg-slate-700 px-1.5 py-0.5 rounded text-xs">9.99$ in £</code></li>
+                            <li><code className="bg-slate-200 dark:bg-slate-700 px-1.5 py-0.5 rounded text-xs">10ft in cm</code> (Convert)</li>
+                            <li><code className="bg-slate-200 dark:bg-slate-700 px-1.5 py-0.5 rounded text-xs">15 USD to EUR</code> (Convert)</li>
+                            <li><code className="bg-slate-200 dark:bg-slate-700 px-1.5 py-0.5 rounded text-xs">(5ft + 10in) * 2</code> (Calculate)</li>
+                            <li><code className="bg-slate-200 dark:bg-slate-700 px-1.5 py-0.5 rounded text-xs">20gbp + 50usd</code> (Calculate)</li>
                         </ul>
                     </div>
                 </div>

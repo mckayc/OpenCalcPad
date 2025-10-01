@@ -3,13 +3,13 @@
 // --- Unit Definitions ---
 
 // Base unit: meter (m)
-const lengthUnits: { [key: string]: number } = {
+export const lengthUnits: { [key: string]: number } = {
   m: 1, meter: 1, meters: 1,
   cm: 0.01, centimeter: 0.01, centimeters: 0.01,
   mm: 0.001, millimeter: 0.001, millimeters: 0.001,
   km: 1000, kilometer: 1000, kilometers: 1000,
-  ft: 0.3048, foot: 0.3048, feet: 0.3048,
-  in: 0.0254, inch: 0.0254, inches: 0.0254,
+  ft: 0.3048, foot: 0.3048, feet: 0.3048, "'": 0.3048,
+  in: 0.0254, inch: 0.0254, inches: 0.0254, '"': 0.0254,
   mi: 1609.34, mile: 1609.34, miles: 1609.34,
   yd: 0.9144, yard: 0.9144, yards: 0.9144,
 };
@@ -47,14 +47,29 @@ const currencyRates: { [key: string]: number } = {
   inr: 83.5, rupee: 83.5, rupees: 83.5,
 };
 
-const unitCategories = [
+export const unitCategories = [
   { name: 'length', units: lengthUnits },
   { name: 'mass', units: massUnits },
   { name: 'volume', units: volumeUnits },
   { name: 'currency', units: currencyRates, isCurrency: true },
 ];
 
-const conversionRegex = /^(\d*\.?\d+)\s*([a-zA-Z$€£¥]+)\s+(?:to|in)\s+([a-zA-Z$€£¥]+)$/i;
+export const findUnit = (unit: string): { categoryName: string; factor: number; isCurrency: boolean } | null => {
+    const lowerUnit = unit.toLowerCase();
+    for (const category of unitCategories) {
+        if (lowerUnit in category.units) {
+            return {
+                categoryName: category.name,
+                factor: category.units[lowerUnit],
+                isCurrency: !!category.isCurrency,
+            };
+        }
+    }
+    return null;
+};
+
+
+const conversionRegex = /^(\d*\.?\d+)\s*([a-zA-Z$€£¥'"]+)\s+(?:to|in)\s+([a-zA-Z$€£¥'"]+)$/i;
 
 export const performConversion = (query: string): string | null => {
   const match = query.trim().match(conversionRegex);
